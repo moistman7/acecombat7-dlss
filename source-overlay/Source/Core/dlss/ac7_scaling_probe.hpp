@@ -8,6 +8,7 @@ inline bool Enabled() {
 inline std::ofstream trace;
 inline unsigned remaining=0,request=0,index=0;
 inline ULONGLONG last_poll=0;
+inline ULONGLONG last_marker_poll=0;
 inline bool key_down=false;
 inline void Resource(ID3D11Resource* resource) {
  if(!resource){trace<<"null";return;}
@@ -21,7 +22,11 @@ inline void Draw(ID3D11DeviceContext* c,uint32_t hash,bool compute) noexcept {
  try {
   const auto now=GetTickCount64();
   if(now-last_poll>=20){last_poll=now;bool down=AC7Capture::Foreground()&&(GetAsyncKeyState(VK_F8)&0x8000);bool edge=down&&!key_down;key_down=down;
-   if(edge&&remaining==0&&request<6){std::filesystem::create_directories(AC7Capture::Root());trace.close();trace.open(AC7Capture::Root()/("scaling-probe-pid"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++request)+".txt"));trace<<"AC7 scaling probe: resource pointer:widthxheight:DXGI; no pixel readbacks\n";remaining=1500;index=0;}
+   const auto marker=AC7Capture::Root()/L"scaling-probe.request";
+   bool marker_requested=false;
+   if(remaining==0&&request<6&&now-last_marker_poll>=250){last_marker_poll=now;std::error_code ec;marker_requested=std::filesystem::exists(marker,ec);}
+   if((edge||marker_requested)&&remaining==0&&request<6){std::filesystem::create_directories(AC7Capture::Root());trace.close();trace.open(AC7Capture::Root()/("scaling-probe-pid"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++request)+".txt"));
+    if(trace){if(marker_requested){std::error_code ec;std::filesystem::remove(marker,ec);}trace<<"AC7 scaling probe: resource pointer:widthxheight:DXGI; no pixel readbacks\n";remaining=1500;index=0;}}
   }
   if(!remaining||!trace)return;
   --remaining;trace<<index++<<' '<<(compute?"CS":"PS")<<' '<<std::hex<<hash<<std::dec;
