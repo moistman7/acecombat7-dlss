@@ -79,7 +79,8 @@ is not required for that symptom. The ultrawide log independently recorded
 missing menu layer. The ultrawide candidate gates that toggle behind diagnostics
 and recognizes reduced scene-shaped targets for menu correction. Its rendered
 tests preserve glyph widths and positions at 50%, 58%, approximately 66.7%, and
-native dimensions; in-game scaling-transition validation is pending.
+native dimensions. The user subsequently confirmed that menus are fixed when
+testing 50% and returning to 100% with the installed ultrawide candidate.
 
 `scripts/diagnostics/scene_scale_probe.py` prepares exact scene-percentage
 requests through Game.ini and DrawScale, backs up both INIs, refuses to change
