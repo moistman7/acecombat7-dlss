@@ -4,6 +4,8 @@ Experimental DLSS integration for ACE COMBAT 7, built on the Luma Unreal Engine 
 
 **v0.1.0-beta.1 currently provides native-resolution DLAA. Quality, Balanced, Performance upscaling and frame generation are not included.** Preset M is the neural model selection; it is separate from the planned scaling modes.
 
+The local `feature/dlss-scaling` branch now includes a tested hangar scaling candidate. See [SCALING-CANDIDATE.md](SCALING-CANDIDATE.md) for activation, modes, validation, and limitations. The public beta described below remains native DLAA.
+
 ## What this release changes
 
 An AC7-specific color conversion substantially reduces the green/purple speckling seen on hangar rafters with preset M. It maps HDR color into a bounded log+sRGB domain for DLSS and restores HDR-linear color afterward. HDR display output remains available. The patch also preserves D3D11 context state around evaluation and includes on-demand input/output capture.

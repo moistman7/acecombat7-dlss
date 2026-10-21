@@ -17,7 +17,7 @@ From the overlaid Luma checkout:
     cmake -S Diagnostics -B Diagnostics/build -G "Visual Studio 17 2022" -A x64
     cmake --build Diagnostics/build --config Release
 
-Run `capture-smoke.exe`, `state-smoke.exe`, and `color-smoke.exe` from the Release directory. These test GPU readback, context restoration, and bounded color encode/decode (including odd dimensions, alpha, resizing, and finite FP16 range).
+Run `capture-smoke.exe`, `state-smoke.exe`, `color-smoke.exe`, and `scaling-smoke.exe` from the Release directory. These test GPU readback, context restoration, and bounded color encode/decode (including odd dimensions, alpha, resizing, and finite FP16 range).
 
 The `replay` target requires the matching official nvngx_dlss.dll beside replay.exe. It replays raw captures directly on the NVIDIA GPU. Basic usage:
 
@@ -25,9 +25,13 @@ The `replay` target requires the matching official nvngx_dlss.dll beside replay.
 
 It is a diagnostic harness for recorded color/depth/motion inputs, not a complete game-frame replay. It reads jitter from evaluation.json; each configuration creates a fresh DLSS feature and evaluates the same input eight times. Its history case is synthetic repeated-frame history, not the original moving-camera sequence. The zero-motion case explicitly uses a zero-filled texture because the SDK helper substitutes scale 1 when scale 0 is supplied. Additional arguments select an alternate input-color directory and a named test (for example M-bridge). See source for the tested parameter cases.
 
+## Scaling candidate
+
+The branch adds `ac7_scaling_runtime.hpp`, reduced-resolution reconstruction and saved mode selection. Create `ac7-scaling-experimental.enabled` beside Ace7Game.exe to activate the AC7-only path, then use the Luma mode selector with DLSS/preset M. The scaling smoke test validates the native-TAA bypass copy on WARP. See SCALING-CANDIDATE.md for live validation.
+
 ## Published binary
 
 v0.1.0-beta.1 add-on SHA256:
 06C7973BA017D04B9569CD16D924B732D1A5326FAB946B0AFDC6B0787365A731
 
-Built with the overlay above. A different toolchain or build path may produce different bytes. Verify behavior and third-party licenses when making your own release.
+Built with the earlier native-DLAA overlay; current branch additions produce the scaling candidate. A different toolchain or build path may produce different bytes. Verify behavior and third-party licenses when making your own release.

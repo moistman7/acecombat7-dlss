@@ -95,3 +95,8 @@ Luma add-on again matches the released `06C797...A731` hash and DrawScale is 5.
 ReShade/HDR settings were not changed. The separate ultrawide candidate is
 installed locally with its original ASI and INI backed up. It is not a DLSS
 scaling implementation or a public release update.
+
+
+## Local scaling candidate, later October 21
+
+The earlier baseline-restored status above is superseded. Reduced-resolution DLSS is implemented on feature/dlss-scaling and installed locally, with live hangar captures for Quality, Balanced, Performance and Native DLAA. See SCALING-CANDIDATE.md for current behavior, activation, validation, and limitations. The published beta remains unchanged.

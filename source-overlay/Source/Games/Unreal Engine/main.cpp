@@ -7,6 +7,7 @@
 #include "..\..\Core\core.hpp"
 #include "includes\shader_detect.hpp"
 #include "../../Core/dlss/ac7_scaling_probe.hpp"
+#include "../../Core/dlss/ac7_scaling_runtime.hpp"
 
 namespace
 {
@@ -86,7 +87,7 @@ namespace
          if (std::fabs(v.z - inv_w) < FLT_EPSILON &&
              std::fabs(v.w - inv_h) < FLT_EPSILON)
          {
-            if (std::fabs((v.x / v.y) - aspect_ratio) < eps)
+            if (std::fabs((v.x / v.y) - aspect_ratio) < (AC7Scaling::Enabled() ? (std::max)(eps, 8.f / v.y) : eps))
             {
                return true;
             }
@@ -124,6 +125,12 @@ struct GameDeviceDataUnrealEngine final : public GameDeviceData
    std::unique_ptr<SR::SuperResolutionImpl::DrawData> sr_draw_data;
    std::atomic<bool> found_per_view_globals = false;
    std::atomic<bool> camera_cut = false;
+   com_ptr<ID3D11Texture2D> ac7_scaling_output;
+   SR::SuperResolutionImpl::DrawData ac7_scaling_draw = {};
+   AC7Scaling::ColorCopy ac7_color_copy;
+   bool ac7_scaling_native_taa = true, ac7_scaling_last_native_taa = true;
+   bool ac7_scaling_ready = false;
+   bool ac7_scaling_history_valid = false;
 #endif // ENABLE_SR
    float4 render_resolution = {0.0f, 0.0f, 0.0f, 0.0f};
    float4 viewport_rect = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -231,6 +238,115 @@ class UnrealEngine final : public Game // ### Rename this to your game's name ##
          DecodeMotionVectorsCS(context, device_data, taa_shader_info);
       else
          DecodeMotionVectorsPS(context, device_data, taa_shader_info);
+   }
+
+   // AC7 4.18 performs spatial upscaling after several low-resolution post
+   // processes. Bring-up keeps native TAA until the final handoff is verified.
+   static bool CaptureAC7ScalingInputs(ID3D11Device* device, ID3D11DeviceContext* context,
+      DeviceData& device_data, CommandListData& cmd_list_data, TAAShaderInfo& info,
+      reshade::api::shader_stage stages, bool& updated_cbuffers, bool& bypass)
+   {
+      bypass = false;
+      auto& game = GetGameDeviceData(device_data);
+      com_ptr<ID3D11RenderTargetView> rtv; context->OMGetRenderTargets(1, &rtv, nullptr);
+      if (!rtv) return false;
+      com_ptr<ID3D11Resource> resource; rtv->GetResource(&resource);
+      com_ptr<ID3D11Texture2D> target; if (FAILED(resource->QueryInterface(&target))) return false;
+      D3D11_TEXTURE2D_DESC desc; target->GetDesc(&desc);
+      if (desc.Width >= device_data.output_resolution.x * .9f || desc.Height >= device_data.output_resolution.y * .9f) return false;
+      device_data.taa_detected = true;
+      if (!global_cb_info.size) {
+         com_ptr<ID3D11Buffer> cb; context->PSGetConstantBuffers(info.global_buffer_register_index, 1, &cb);
+         if (cb) {D3D11_BUFFER_DESC bd; cb->GetDesc(&bd); global_cb_info.size = bd.ByteWidth;}
+         return true;
+      }
+      if (!game.found_per_view_globals || !device_data.native_pixel_shaders[CompileTimeStringHash("Decode MVs PS")]) {AC7Scaling::Record("waiting for view globals or MV shader"); return true;}
+      D3D11_VIEWPORT vp = {}; UINT count = 1; context->RSGetViewports(&count, &vp);
+      if (count != 1 || vp.TopLeftX != 0 || vp.TopLeftY != 0 || vp.Width != desc.Width || vp.Height != desc.Height) return true;
+      com_ptr<ID3D11ShaderResourceView> depth_srv, motion_srv;
+      context->PSGetShaderResources(info.depth_texture_register, 1, &depth_srv);
+      context->PSGetShaderResources(info.velocity_texture_register, 1, &motion_srv);
+      if (!depth_srv || !motion_srv) return true;
+      com_ptr<ID3D11Resource> depth, motion; depth_srv->GetResource(&depth); motion_srv->GetResource(&motion);
+      com_ptr<ID3D11Texture2D> motion_texture; if (FAILED(motion->QueryInterface(&motion_texture))) return true;
+      D3D11_TEXTURE2D_DESC md; motion_texture->GetDesc(&md);
+      if (md.Width != desc.Width || md.Height != desc.Height || md.SampleDesc.Count != 1) return true;
+      bool recreate = !game.sr_motion_vectors;
+      if (!recreate) {D3D11_TEXTURE2D_DESC old; game.sr_motion_vectors->GetDesc(&old); recreate = old.Width != md.Width || old.Height != md.Height;}
+      if (recreate) {
+         game.sr_motion_vectors_rtv = nullptr; game.sr_motion_vectors = nullptr;
+         md.Format = DXGI_FORMAT_R32G32_FLOAT; md.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+         md.Usage = D3D11_USAGE_DEFAULT; md.CPUAccessFlags = md.MiscFlags = 0; md.MipLevels = md.ArraySize = 1;
+         if (FAILED(device->CreateTexture2D(&md, nullptr, &game.sr_motion_vectors)) || FAILED(device->CreateRenderTargetView(game.sr_motion_vectors.get(), nullptr, &game.sr_motion_vectors_rtv))) return true;
+         game.ac7_scaling_history_valid = false;
+      }
+      game.render_resolution = {(float)desc.Width, (float)desc.Height, 1.f / desc.Width, 1.f / desc.Height};
+      game.viewport_rect = {0.f, 0.f, (float)desc.Width, (float)desc.Height};
+      // Capture at the TAA boundary while the original view cbuffer is bound.
+      DrawStateStack<DrawStateStackType::FullGraphics> state; state.Cache(context, device_data.uav_max_count);
+      if (!updated_cbuffers) SetLumaConstantBuffers(context, cmd_list_data, device_data, stages, LumaConstantBufferType::LumaSettings, 0, 0, 0.f, 0.f, false);
+      DecodeMotionVectorsPS(context, device_data, info); state.Restore(context);
+      game.depth_buffer = depth;
+      game.ac7_scaling_draw = {};
+      game.ac7_scaling_draw.render_width = desc.Width; game.ac7_scaling_draw.render_height = desc.Height;
+      game.ac7_scaling_draw.jitter_x = game.jitter.x * desc.Width * .5f;
+      game.ac7_scaling_draw.jitter_y = game.jitter.y * desc.Height * -.5f;
+      game.ac7_scaling_draw.near_plane = game.near_plane / 100.f;
+      game.ac7_scaling_draw.far_plane = FLT_MAX; game.ac7_scaling_draw.vert_fov = game.fov_y;
+      game.ac7_scaling_draw.reset = !game.ac7_scaling_history_valid || game.camera_cut || device_data.force_reset_sr;
+      game.ac7_scaling_native_taa = true;
+      if (game.ac7_scaling_history_valid && device_data.sr_type == SR::Type::DLSS && dlss_render_preset == 13) {
+         com_ptr<ID3D11ShaderResourceView> current; context->PSGetShaderResources(info.source_texture_register, 1, &current);
+         if (current && game.ac7_color_copy.Copy(device, context, current.get(), target.get())) {
+            bypass = true; game.ac7_scaling_native_taa = false;
+         }
+      }
+      game.ac7_scaling_draw.reset |= game.ac7_scaling_native_taa != game.ac7_scaling_last_native_taa;
+      game.ac7_scaling_ready = true;
+      AC7Scaling::Record(std::format("inputs {}x{} jitter={},{}", desc.Width, desc.Height, game.ac7_scaling_draw.jitter_x, game.ac7_scaling_draw.jitter_y));
+      return true;
+   }
+
+   static bool DrawAC7ScalingHandoff(ID3D11Device* device, ID3D11DeviceContext* context, DeviceData& device_data)
+   {
+      auto& game = GetGameDeviceData(device_data);
+      if (!game.ac7_scaling_ready || device_data.sr_type != SR::Type::DLSS || dlss_render_preset != 13) return false;
+      com_ptr<ID3D11ShaderResourceView> srv; context->PSGetShaderResources(0, 1, &srv);
+      com_ptr<ID3D11RenderTargetView> rtv; context->OMGetRenderTargets(1, &rtv, nullptr);
+      if (!srv || !rtv || !game.depth_buffer || !game.sr_motion_vectors) return false;
+      com_ptr<ID3D11Resource> source, destination; srv->GetResource(&source); rtv->GetResource(&destination);
+      com_ptr<ID3D11Texture2D> input, output;
+      if (FAILED(source->QueryInterface(&input)) || FAILED(destination->QueryInterface(&output))) return false;
+      D3D11_TEXTURE2D_DESC in_desc, out_desc; input->GetDesc(&in_desc); output->GetDesc(&out_desc);
+      D3D11_VIEWPORT vp = {}; UINT n = 1; context->RSGetViewports(&n, &vp);
+      if (in_desc.Width != game.ac7_scaling_draw.render_width || in_desc.Height != game.ac7_scaling_draw.render_height ||
+          out_desc.Width != device_data.output_resolution.x || out_desc.Height != device_data.output_resolution.y ||
+          out_desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || n != 1 || vp.TopLeftX != 0 || vp.TopLeftY != 0 || vp.Width != out_desc.Width || vp.Height != out_desc.Height) return false;
+      bool recreate = !game.ac7_scaling_output;
+      if (!recreate) {D3D11_TEXTURE2D_DESC old; game.ac7_scaling_output->GetDesc(&old); recreate = old.Width != out_desc.Width || old.Height != out_desc.Height;}
+      if (recreate) {
+         game.ac7_scaling_output = nullptr;
+         auto allocation = out_desc; allocation.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+         allocation.Usage = D3D11_USAGE_DEFAULT; allocation.CPUAccessFlags = allocation.MiscFlags = 0; allocation.ArraySize = allocation.MipLevels = 1;
+         if (FAILED(device->CreateTexture2D(&allocation, nullptr, &game.ac7_scaling_output))) return false;
+         game.ac7_scaling_draw.reset = true;
+      }
+      auto* instance = device_data.GetSRInstanceData(); if (!instance) return false;
+      SR::SettingsData settings;
+      settings.output_width = out_desc.Width; settings.output_height = out_desc.Height;
+      settings.render_width = in_desc.Width; settings.render_height = in_desc.Height;
+      settings.dynamic_resolution = true; settings.hdr = true; settings.inverted_depth = true;
+      settings.mvs_jittered = false; settings.auto_exposure = sr_auto_exposure; settings.render_preset = 13;
+      settings.mvs_x_scale = settings.mvs_y_scale = 1.f;
+      if (!sr_implementations[SR::Type::DLSS]->UpdateSettings(instance, context, settings)) {AC7Scaling::Record("settings failed"); return false;}
+      auto draw = game.ac7_scaling_draw;
+      draw.source_color = source.get(); draw.output_color = game.ac7_scaling_output.get();
+      draw.depth_buffer = game.depth_buffer.get(); draw.motion_vectors = game.sr_motion_vectors.get();
+      if (!sr_implementations[SR::Type::DLSS]->Draw(instance, context, draw)) {AC7Scaling::Record("evaluation failed"); return false;}
+      context->CopyResource(destination.get(), game.ac7_scaling_output.get());
+      device_data.has_drawn_sr = true; device_data.force_reset_sr = false;
+      AC7Scaling::Record(std::format("handoff {}x{} -> {}x{} preset=M reset={} native_taa={}", in_desc.Width, in_desc.Height, out_desc.Width, out_desc.Height, draw.reset, game.ac7_scaling_native_taa));
+      return true;
    }
 
 public:
@@ -562,6 +678,7 @@ public:
       GameDeviceDataUnrealEngine& game_device_data = GetGameDeviceData(device_data);
       bool is_compute_shader = stages == reshade::api::shader_stage::all_compute;
       if (!is_custom_pass) AC7ScaleProbe::Draw(native_device_context, is_compute_shader ? original_shader_hashes.compute_shaders[0] : original_shader_hashes.pixel_shaders[0], is_compute_shader);
+      if (!is_custom_pass && !is_compute_shader && AC7Scaling::Enabled() && original_shader_hashes.pixel_shaders[0] == 0xDFD36C0Eu && DrawAC7ScalingHandoff(native_device, native_device_context, device_data)) return DrawOrDispatchOverrideType::Skip;
 
       // TODO: filter then to a more optimized list after confirming them
       // Find the shader that reads the tonemap LUT to do the per tonemapping.
@@ -749,9 +866,9 @@ public:
             float output_aspect_ratio = static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
             float swapchain_aspect_ratio = device_data.render_resolution.x / device_data.render_resolution.y;
 
-            if (std::fabs(output_aspect_ratio - swapchain_aspect_ratio) > FLT_EPSILON)
+            if (std::fabs(output_aspect_ratio - swapchain_aspect_ratio) > (AC7Scaling::Enabled() ? 8.f / desc.Height : FLT_EPSILON))
                continue;
-            if (desc.Width < device_data.render_resolution.x || desc.Height < device_data.render_resolution.y)
+            if (desc.Width < device_data.render_resolution.x * (AC7Scaling::Enabled() ? .49f : 1.f) || desc.Height < device_data.render_resolution.y * (AC7Scaling::Enabled() ? .49f : 1.f))
                continue;
 
             switch (desc.Format)
@@ -802,6 +919,11 @@ public:
 
       // Scaling probes keep native TAA so no partial DLSS upscaling can be mistaken for a working mode.
       if (AC7ScaleProbe::Enabled() && is_taa) return DrawOrDispatchOverrideType::None;
+      if (is_taa && !is_compute_shader && AC7Scaling::Enabled()) {
+         bool bypass = false;
+         if (CaptureAC7ScalingInputs(native_device, native_device_context, device_data, cmd_list_data, taa_shader_info, stages, updated_cbuffers, bypass))
+            return bypass ? DrawOrDispatchOverrideType::Skip : DrawOrDispatchOverrideType::None;
+      }
 
       // if we already drew SR this frame, copy dlss output to shader output (some games run different quality settings in the same frame?)
       if (is_taa && device_data.has_drawn_sr)
@@ -1141,6 +1263,17 @@ public:
    void OnPresent(ID3D11Device* native_device, DeviceData& device_data) override
    {
       auto& game_device_data = GetGameDeviceData(device_data);
+      if (AC7Scaling::Enabled()) {
+         game_device_data.ac7_scaling_history_valid = game_device_data.ac7_scaling_ready && device_data.has_drawn_sr;
+         game_device_data.ac7_scaling_last_native_taa = game_device_data.ac7_scaling_native_taa;
+         game_device_data.ac7_scaling_ready = false;
+         if (AC7Scaling::PollModeRequest()) {
+            reshade::set_config_value(nullptr, NAME, "AC7ScalingMode", AC7Scaling::mode);
+            device_data.force_reset_sr = true; game_device_data.ac7_scaling_history_valid = false;
+         }
+         static ULONGLONG last_mode_apply = 0;
+         if (GetTickCount64() - last_mode_apply >= 1000) {last_mode_apply = GetTickCount64(); AC7Scaling::ApplyMode();}
+      }
       game_device_data.found_per_view_globals = false;
       game_device_data.camera_cut = !device_data.taa_detected && !device_data.has_drawn_sr && !device_data.force_reset_sr;
       device_data.has_drawn_sr = false;
@@ -1162,6 +1295,8 @@ public:
       game_device_data.depth_buffer = nullptr;
       game_device_data.sr_settings_data = nullptr;
       game_device_data.sr_draw_data = nullptr;
+      game_device_data.ac7_scaling_output = nullptr;
+      game_device_data.ac7_scaling_ready = game_device_data.ac7_scaling_history_valid = false;
    }
 
    void UpdateLumaInstanceDataCB(CB::LumaInstanceDataPadded& data, CommandListData& cmd_list_data, DeviceData& device_data) override
@@ -1253,6 +1388,11 @@ public:
       auto& game_device_data = GetGameDeviceData(device_data);
 
       reshade::api::effect_runtime* runtime = nullptr;
+      if (AC7Scaling::Enabled() && ImGui::Combo("AC7 DLSS Mode (experimental)", &AC7Scaling::mode, AC7Scaling::ModeNames)) {
+         device_data.force_reset_sr = true; game_device_data.ac7_scaling_history_valid = false;
+         AC7Scaling::ApplyMode();
+         reshade::set_config_value(nullptr, NAME, "AC7ScalingMode", AC7Scaling::mode);
+      }
 
       ImGui::NewLine();
 
@@ -1424,6 +1564,7 @@ public:
             game_device_data.fov_y = ComputeFovY(matrix_a);
             device_data.render_resolution.x = vsize_and_inv_size.x;
             device_data.render_resolution.y = vsize_and_inv_size.y;
+            if (AC7Scaling::Enabled()) {game_device_data.render_resolution = vsize_and_inv_size; game_device_data.viewport_rect = {0.f, 0.f, vsize_and_inv_size.x, vsize_and_inv_size.y};}
             game_device_data.found_per_view_globals = true;
          }
       }
@@ -1470,6 +1611,7 @@ public:
                global_cb_info.view_to_clip_start_index = static_cast<int>(i);
                device_data.render_resolution.x = vsize_and_inv_size.x;
                device_data.render_resolution.y = vsize_and_inv_size.y;
+            if (AC7Scaling::Enabled()) {game_device_data.render_resolution = vsize_and_inv_size; game_device_data.viewport_rect = {0.f, 0.f, vsize_and_inv_size.x, vsize_and_inv_size.y};}
                game_device_data.found_per_view_globals = true;
                break;
             }
@@ -1559,6 +1701,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
    // Needs to be done after core init (because it calls some ReShade funcs)
    if (ul_reason_for_call == DLL_PROCESS_ATTACH)
    {
+      if (AC7Scaling::Enabled()) {reshade::get_config_value(nullptr, NAME, "AC7ScalingMode", AC7Scaling::mode); if (AC7Scaling::mode < 0 || AC7Scaling::mode > 3) AC7Scaling::mode = 0;}
 #if !DEVELOPMENT // Force HDR in dev mode, so we can easily debug textures
       reshade::get_config_value(nullptr, NAME, "FirstBoot", first_boot);
       if (first_boot)

@@ -14,6 +14,7 @@
 #include "ac7_capture.hpp"
 #include "ac7_ngx_state.hpp"
 #include "ac7_color_bridge.hpp"
+#include "ac7_scaling_runtime.hpp"
 
 // Should be <= the max (last) of NVSDK_NGX_PerfQuality_Value
 #define NUM_PERF_QUALITY_MODES 6
@@ -280,7 +281,7 @@ bool NGX::DLSS::UpdateSettings(SR::InstanceData* data, ID3D11DeviceContext* comm
 
 	auto settings_data = original_settings;
 	if (custom_data) {
-		custom_data->ac7_color_enabled = custom_data->ac7_color_allowed && settings_data.render_preset == 13 && settings_data.hdr && settings_data.render_width == settings_data.output_width && settings_data.render_height == settings_data.output_height;
+		custom_data->ac7_color_enabled = custom_data->ac7_color_allowed && settings_data.render_preset == 13 && settings_data.hdr && ((settings_data.render_width == settings_data.output_width && settings_data.render_height == settings_data.output_height) || (AC7Scaling::Enabled() && settings_data.render_width <= settings_data.output_width && settings_data.render_height <= settings_data.output_height));
 		if (custom_data->ac7_color_enabled) settings_data.hdr = false;
 	}
 	// Early exit if DLSS is not supported by hardware or driver.
@@ -399,7 +400,7 @@ bool NGX::DLSS::Draw(const SR::InstanceData* data, ID3D11DeviceContext* command_
 	auto draw_data = original_draw;
 	AC7Capture::ScopedNGXState full_state(command_list, custom_data->ac7_ngx_state.Get());
 	if (custom_data->ac7_color_enabled) {
-		if (!custom_data->ac7_color.Prepare(custom_data->device.Get(), custom_data->settings_data.output_width, custom_data->settings_data.output_height) || !custom_data->ac7_color.Encode(custom_data->device.Get(), command_list, original_draw.source_color)) return false;
+		if (!custom_data->ac7_color.Prepare(custom_data->device.Get(), custom_data->settings_data.render_width, custom_data->settings_data.render_height, custom_data->settings_data.output_width, custom_data->settings_data.output_height) || !custom_data->ac7_color.Encode(custom_data->device.Get(), command_list, original_draw.source_color)) return false;
 		draw_data.source_color = custom_data->ac7_color.Input();
 		draw_data.output_color = custom_data->ac7_color.Output();
 	}

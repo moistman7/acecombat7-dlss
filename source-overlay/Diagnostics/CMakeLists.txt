@@ -18,3 +18,7 @@ set_property(TARGET replay PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFI
 add_executable(color-smoke color-smoke.cpp)
 target_compile_features(color-smoke PRIVATE cxx_std_20)
 target_link_libraries(color-smoke PRIVATE d3d11)
+
+add_executable(scaling-smoke scaling-smoke.cpp)
+target_compile_features(scaling-smoke PRIVATE cxx_std_20)
+target_link_libraries(scaling-smoke PRIVATE d3d11)
