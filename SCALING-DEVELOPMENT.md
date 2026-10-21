@@ -19,3 +19,9 @@ Remaining game work: reduce the actual scene-rendering cost, identify the low-re
 A development add-on recognizes an `ac7-scaling-probe.enabled` marker beside Ace7Game.exe. It leaves TAA to the game and logs 1500 draws/dispatches when F8 is pressed. `AC7-DLSS-Captures/scaling-probe-pid*-*.txt` records shader hashes, viewport, output texture identity/dimensions/format, and the first eight input resources. There are no pixel readbacks from this trace. It can generate a short I/O stall.
 
 The local test setup temporarily sets Engine.ini `r.ScreenPercentage=66.666667`; the configuration is not part of the published release and is backed up locally. This probe is intentionally not a completed Quality mode. The enabled marker must be removed and Engine.ini restored when returning to the released DLAA build. Initial low-resolution capture is pending.
+
+## First live probe result — October 21, 12:36
+
+All four F8 pipeline traces completed (1500 events each). The hangar main scene did not honor the requested 66.666667 screen percentage: both known TAA shaders (7DEC23DF and 640B9ECB), their source color, depth and motion-vector resources, and their outputs remained 3440x1440. No approximately 2294x960 scene/TAA target was observed. Existing 1720x720 and smaller resources are auxiliary passes and are insufficient evidence of lower-resolution main rendering.
+
+The screenshots show the hangar and persistent description bars. This probe used native TAA, so it does not measure the released M color bridge. The improved released add-on and previous Engine.ini were restored after inspection. Need establish the effective scene-scale control (and whether hangar and flight use different rules) before implementing live scaling selection. Repeating the same hangar probe with the same INI value will not resolve that question.
