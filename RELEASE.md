@@ -1,16 +1,13 @@
-# v0.1.0-beta.1 â€” experimental DLAA/preset-M integration
+# v0.2.0-beta.1 — experimental DLSS scaling
 
-Initial public AC7 DLSS project release, built on Luma latest-755.
+Adds Quality, Balanced and Performance modes alongside native DLAA, using model preset M. The mode selector is in Home > Luma > AC7 DLSS Mode (experimental), and the choice is saved. Installer defaults to Quality and backs up the previous add-on, settings and scaling-marker state.
 
-- Native-resolution DLAA with model preset M.
-- AC7-specific bounded color conversion to reduce colored noise on hangar rafters.
-- D3D11 context-state preservation, F8 GPU capture, source overlay, and diagnostic tests.
-- Installer with checksum validation and add-on/settings backup; restore script included.
+Live hangar captures at 3440×1440 confirm actual input/output dimensions for all four modes: Quality 2296×960, Balanced 1996×836, Performance 1720×720, and native DLAA 3440×1440, each outputting 3440×1440. Captured HDR-linear outputs contain no NaNs/infinities. Native TAA is bypassed after reconstruction warmup for scaling modes. GPU smoke tests pass for capture, context preservation, HDR conversion and TAA bypass copies.
 
-**Quality, Balanced, Performance upscaling and frame generation are not included.**
+This is an unofficial experimental prerelease. Flight, moving-camera quality, FPS gains, long sessions and other GPUs/displays are not validated. Existing cyan artifacts over aircraft-description text and highlight overshoot remain. DLSS follows reduced-resolution postprocessing. Some ultrawide configurations need a separate menu-scaling fix, which is not bundled. No frame generation.
 
-Requires the matching official [Luma Unreal Engine latest-755 package](https://github.com/Filoppi/Luma-Framework/releases/download/latest-755/Luma-Unreal_Engine.zip). This ZIP replaces its add-on only; NVIDIA DLLs and the ReShade loader are not bundled.
+Requires the matching official [Luma Unreal Engine latest-755 package](https://github.com/Filoppi/Luma-Framework/releases/download/latest-755/Luma-Unreal_Engine.zip), D3D11, an RTX GPU, and game TAA. The ZIP replaces the add-on and includes installer/restore scripts; NVIDIA DLLs, loader, game files and user captures are not included.
 
-Initial live testing: RTX 5090, 3440x1440. Hangar rafters improved substantially. Intermittent cyan description bars and highlight overshoot remain; flight, performance, and wider GPU compatibility still require testing. This is an unofficial experimental pre-release.
+Add-on SHA256: `290DE5048C09954D4ADEA1C3F1E1FB666DB78A94F5418D42A5CE11F828A3ED56`.
 
-See README.md for installation, credits, known issues and rollback. Full source changes and build instructions are available in this repository. No game files or user captures are included.
+See README.md and SCALING-CANDIDATE.md for installation and validation scope.

@@ -2,15 +2,15 @@
 
 Experimental DLSS integration for ACE COMBAT 7, built on the Luma Unreal Engine add-on.
 
-**v0.1.0-beta.1 currently provides native-resolution DLAA. Quality, Balanced, Performance upscaling and frame generation are not included.** Preset M is the neural model selection; it is separate from the planned scaling modes.
+**v0.2.0-beta.1 adds experimental Quality, Balanced and Performance upscaling, plus native DLAA.** Model preset M remains required for the tested scaling path. Frame generation is not included.
 
-The local `feature/dlss-scaling` branch now includes a tested hangar scaling candidate. See [SCALING-CANDIDATE.md](SCALING-CANDIDATE.md) for activation, modes, validation, and limitations. The public beta described below remains native DLAA.
+The installer selects Quality. Press **Home**, open Luma's settings, then use **AC7 DLSS Mode (experimental)**. The selected mode is saved. At 3440×1440, live hangar captures confirmed 2296×960 (Quality), 1996×836 (Balanced), 1720×720 (Performance), and 3440×1440 (native DLAA), all producing 3440×1440 output. See [validation and limitations](SCALING-CANDIDATE.md).
 
 ## What this release changes
 
 An AC7-specific color conversion substantially reduces the green/purple speckling seen on hangar rafters with preset M. It maps HDR color into a bounded log+sRGB domain for DLSS and restores HDR-linear color afterward. HDR display output remains available. The patch also preserves D3D11 context state around evaluation and includes on-demand input/output capture.
 
-The color conversion applies to preset M and matching input/output resolutions. Other model presets retain the upstream color path. This is an experimental compatibility treatment, not an official NVIDIA or Luma release.
+The color conversion applies to preset M at native resolution and with the AC7 scaling path enabled. Other model presets retain the upstream color path. This is an experimental compatibility treatment, not an official NVIDIA or Luma release.
 
 ## Requirements
 
@@ -31,11 +31,11 @@ This download contains the modified add-on only. It does not bundle NVIDIA DLLs,
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameDirectory 'D:\YourSteamLibrary\steamapps\common\ACE COMBAT 7'
    ```
 
-   The installer backs up the existing Luma add-on and ReShade.ini, checks the patch hash, replaces only the add-on, and selects DLSS/preset M. It retains your HDR/display settings and game configuration.
+   The installer backs up the existing Luma add-on and ReShade.ini, checks the patch hash, replaces only the add-on, and selects DLSS/preset M and Quality, and activates the scaling marker. It retains your HDR/display settings and game configuration.
 4. Enable TAA in the game. If TAA detection is absent, the tested Engine.ini settings are `[SystemSettings]` with `r.DefaultFeature.AntiAliasing=2` and `r.PostProcessAAQuality=4`; back up your config before changing it.
 5. Launch the game and check the hangar, menus, bright scenes, and flight. Report the GPU, driver, resolution, display mode, and other graphics mods with issues.
 
-To install manually, back up and replace `Luma-Unreal Engine.addon` beside `Ace7Game.exe`; select DLSS and preset M in Luma. Keep the official package's shaders and NVIDIA DLL.
+To install manually, back up and replace `Luma-Unreal Engine.addon` beside `Ace7Game.exe`; select DLSS and preset M in Luma, and create an empty `ac7-scaling-experimental.enabled` file beside the game executable to activate the scaling selector. Keep the official package's shaders and NVIDIA DLL.
 
 ## Known limitations
 
@@ -43,7 +43,9 @@ To install manually, back up and replace `Luma-Unreal Engine.addon` beside `Ace7
 - Some bright pixels overshoot their input brightness in live captures. No NaNs/infinities appeared in the inspected corrected captures, but brightness is not fully validated.
 - Hangar visuals improved in live testing; flight, performance, broad GPU compatibility, and long sessions are not yet validated.
 - The mapping clamps negative HDR components to zero and components above 65504. It adds two compute passes and float16 conversions.
-- No Quality/Balanced/Performance modes or frame generation in this release.
+- No frame generation. Scaling is verified only on the tested game executable and hangar setup.
+- DLSS follows low-resolution postprocessing in this UE4.18 integration; flight and moving-camera quality remain unverified.
+- Existing ultrawide mods may need a separate menu fix when scene scaling changes; that mod is not bundled.
 
 ## Capture and rollback
 

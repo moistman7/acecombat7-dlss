@@ -9,4 +9,9 @@ $record=Get-Content -LiteralPath (Join-Path $backup 'manifest.json') -Raw | Conv
 if($record.GameDirectory -ne $game){throw 'This backup belongs to a different game directory.'}
 foreach($name in @('Luma-Unreal Engine.addon','ReShade.ini')){if(-not(Test-Path -LiteralPath (Join-Path $backup $name) -PathType Leaf)){throw "Incomplete backup: $name"}}
 foreach($name in @('Luma-Unreal Engine.addon','ReShade.ini')){Copy-Item -LiteralPath (Join-Path $backup $name) -Destination (Join-Path $game $name) -Force}
+$marker=Join-Path $game 'ac7-scaling-experimental.enabled'
+if($record.PSObject.Properties.Name -contains 'HadScalingMarker'){
+ if($record.HadScalingMarker){Copy-Item -LiteralPath (Join-Path $backup 'ac7-scaling-experimental.enabled') -Destination $marker -Force}
+ elseif(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
+}
 Write-Output 'Restored the backed-up add-on and ReShade.ini. Captures and other mods were retained.'
