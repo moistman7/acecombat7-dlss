@@ -62,3 +62,35 @@ The development pipeline probe also accepts `AC7-DLSS-Captures/scaling-probe.req
 It checks for this marker every 250 ms while idle and consumes it after opening
 its trace. This trigger was compiled successfully; live marker-trigger testing
 is pending. The newly built probe has not been installed over the good release.
+
+## Scene-control and menu investigation — October 21, afternoon
+
+The probe was subsequently installed temporarily with DrawScale 0 and the
+Game.ini section selecting 50. Both live cvar copies reported 50.0. The file
+trigger produced a complete 1500-event trace (`scaling-probe-pid7324-1.txt`),
+validating that trigger. This trace was taken at the title screen, so it does
+not establish reduced hangar or flight rendering. A 1720×720 viewport appears
+in the trace but is not sufficient proof of the required main-scene path.
+
+The user reported distorted/disappearing menus when changing Resolution
+Scaling, including during the native-TAA probe. Therefore DLSS reconstruction
+is not required for that symptom. The ultrawide log independently recorded
+`15:25:04 F10: UI-plane composite hidden`, a debug toggle that can hide the
+missing menu layer. The ultrawide candidate gates that toggle behind diagnostics
+and recognizes reduced scene-shaped targets for menu correction. Its rendered
+tests preserve glyph widths and positions at 50%, 58%, approximately 66.7%, and
+native dimensions; in-game scaling-transition validation is pending.
+
+`scripts/diagnostics/scene_scale_probe.py` prepares exact scene-percentage
+requests through Game.ini and DrawScale, backs up both INIs, refuses to change
+them while AC7 runs, and detects later edits during rollback. Fixture checks
+passed for UTF-8, UTF-8 BOM, UTF-16, unrelated-setting preservation, missing
+Game.ini, byte-for-byte restore, and refusal to overwrite later edits. AC7 can
+remove the temporary Game.ini override on exit; the strict restore detected
+that rewrite, and the actual diff was reviewed before restoring the originals.
+
+The native-TAA probe and 50% config were removed after this test. The installed
+Luma add-on again matches the released `06C797...A731` hash and DrawScale is 5.
+ReShade/HDR settings were not changed. The separate ultrawide candidate is
+installed locally with its original ASI and INI backed up. It is not a DLSS
+scaling implementation or a public release update.
