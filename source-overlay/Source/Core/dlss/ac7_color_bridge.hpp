@@ -13,7 +13,7 @@ class ColorBridge {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> input, output;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> input_srv, output_srv;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> input_uav, output_uav;
-    UINT width = 0, height = 0, uav_count = 8;
+    UINT width = 0, height = 0, input_width = 0, input_height = 0, uav_count = 8;
     static constexpr const char* shader = R"(
 Texture2D<float4> Source : register(t0);
 RWTexture2D<float4> Target : register(u0);
@@ -45,35 +45,37 @@ float3 ToLinear(float3 v) { return float3(v.x<=0.04045?v.x/12.92:pow((v.x+0.055)
         t.Reset();s.Reset();u.Reset();D3D11_TEXTURE2D_DESC desc={};desc.Width=w;desc.Height=h;desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
         return SUCCEEDED(d->CreateTexture2D(&desc,nullptr,&t))&&SUCCEEDED(d->CreateShaderResourceView(t.Get(),nullptr,&s))&&SUCCEEDED(d->CreateUnorderedAccessView(t.Get(),nullptr,&u));
     }
-    void Dispatch(ID3D11DeviceContext* c,ID3D11ComputeShader* cs,ID3D11ShaderResourceView* s,ID3D11UnorderedAccessView* u) {
+    void Dispatch(ID3D11DeviceContext* c,ID3D11ComputeShader* cs,ID3D11ShaderResourceView* s,ID3D11UnorderedAccessView* u, UINT dispatch_width, UINT dispatch_height) {
         ID3D11UnorderedAccessView* empty_uavs[64] = {};
         ID3D11ShaderResourceView* empty_srvs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
         c->OMSetRenderTargetsAndUnorderedAccessViews(0,nullptr,nullptr,0,uav_count,empty_uavs,nullptr);
         c->CSSetUnorderedAccessViews(0,uav_count,empty_uavs,nullptr);
         c->CSSetShaderResources(0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,empty_srvs);
-        c->CSSetShader(cs,nullptr,0);c->CSSetShaderResources(0,1,&s);c->CSSetUnorderedAccessViews(0,1,&u,nullptr);c->Dispatch((width+7)/8,(height+7)/8,1);
+        c->CSSetShader(cs,nullptr,0);c->CSSetShaderResources(0,1,&s);c->CSSetUnorderedAccessViews(0,1,&u,nullptr);c->Dispatch((dispatch_width+7)/8,(dispatch_height+7)/8,1);
         ID3D11ShaderResourceView* nulls=nullptr;ID3D11UnorderedAccessView* nullu=nullptr;c->CSSetShaderResources(0,1,&nulls);c->CSSetUnorderedAccessViews(0,1,&nullu,nullptr);
     }
 public:
-    bool Prepare(ID3D11Device* d,UINT w,UINT h) {
+    bool Prepare(ID3D11Device* d,UINT w,UINT h) { return Prepare(d,w,h,w,h); }
+    bool Prepare(ID3D11Device* d,UINT iw,UINT ih,UINT w,UINT h) {
         uav_count = d->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_1 ? 64 : 8;
         if(!Shaders(d))return false;
-        if(w!=width||h!=height||!input_uav||!output_uav){
-            if(!Texture(d,input,input_srv,input_uav,w,h)||!Texture(d,output,output_srv,output_uav,w,h))return false;width=w;height=h;
+        if(iw!=input_width||ih!=input_height||w!=width||h!=height||!input_uav||!output_uav){
+            if(!Texture(d,input,input_srv,input_uav,iw,ih)||!Texture(d,output,output_srv,output_uav,w,h))return false;width=w;height=h;input_width=iw;input_height=ih;
         }return true;
     }
     bool Encode(ID3D11Device* d,ID3D11DeviceContext* c,ID3D11Resource* source) {
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
         if(FAILED(d->CreateShaderResourceView(source,nullptr,&srv)))return false;
-        Dispatch(c,encode.Get(),srv.Get(),input_uav.Get());return true;
+        Dispatch(c,encode.Get(),srv.Get(),input_uav.Get(),input_width,input_height);return true;
     }
     bool Decode(ID3D11Device* d,ID3D11DeviceContext* c,ID3D11Resource* target) {
         Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> uav;
         if(FAILED(d->CreateUnorderedAccessView(target,nullptr,&uav)))return false;
-        Dispatch(c,decode.Get(),output_srv.Get(),uav.Get());return true;
+        Dispatch(c,decode.Get(),output_srv.Get(),uav.Get(),width,height);return true;
     }
     ID3D11Resource* Input()const{return input.Get();}
     ID3D11Resource* Output()const{return output.Get();}
 };
 }
+
 
