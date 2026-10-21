@@ -2,9 +2,9 @@
 
 Experimental DLSS integration for ACE COMBAT 7, built on the Luma Unreal Engine add-on.
 
-**v0.2.0-beta.1 adds experimental Quality, Balanced and Performance upscaling, plus native DLAA.** Model preset M remains required for the tested scaling path. Frame generation is not included.
+**v0.2.0-beta.1 adds experimental Quality, Balanced and Performance upscaling, plus native DLAA.** Native DLAA works with any DLSS preset. M and K were the presets with reported issues; both are now fixed. The reduced-resolution scaling path in this binary still requires preset M. Frame generation is not included.
 
-The installer selects Quality. Press **Home**, open Luma's settings, then use **AC7 DLSS Mode (experimental)**. The selected mode is saved. At 3440×1440, live hangar captures confirmed 2296×960 (Quality), 1996×836 (Balanced), 1720×720 (Performance), and 3440×1440 (native DLAA), all producing 3440×1440 output. See [validation and limitations](SCALING-CANDIDATE.md).
+The installer selects Quality. Press **Home**, open Luma's settings, then use **AC7 DLSS Mode (experimental)**. The selected mode is saved. At 3440Ã—1440, live hangar captures confirmed 2296Ã—960 (Quality), 1996Ã—836 (Balanced), 1720Ã—720 (Performance), and 3440Ã—1440 (native DLAA), all producing 3440Ã—1440 output. See [validation and limitations](SCALING-CANDIDATE.md).
 
 ## What this release changes
 
